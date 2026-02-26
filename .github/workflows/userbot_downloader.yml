@@ -1,0 +1,61 @@
+name: Telegram Userbot Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_link:
+        description: 'Dán link video nội bộ (t.me/c/...) hoặc link ngoài'
+        required: true
+
+jobs:
+  run_userbot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Pyrogram
+        run: pip install pyrogram tgcrypto
+
+      - name: Process Video
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          SESSION_STRING: ${{ secrets.SESSION_STRING }}
+          DEST_CHAT: ${{ secrets.DEST_CHAT }}
+          VIDEO_LINK: ${{ github.event.inputs.video_link }}
+        run: |
+          python - <<EOF
+          import os
+          import asyncio
+          from pyrogram import Client
+
+          async def main():
+              api_id = int(os.getenv("API_ID"))
+              api_hash = os.getenv("API_HASH")
+              session = os.getenv("SESSION_STRING")
+              dest_chat = int(os.getenv("DEST_CHAT"))
+              video_link = os.getenv("VIDEO_LINK")
+
+              async with Client("my_account", api_id, api_hash, session_string=session) as app:
+                  # Phân tích link t.me/c/12345678/999
+                  parts = video_link.split('/')
+                  chat_id = int("-100" + parts[-2])
+                  msg_id = int(parts[-1])
+                  
+                  # Tải video từ nhóm kín (vì tài khoản của bạn đã ở trong nhóm đó)
+                  print("Đang tải video...")
+                  path = await app.download_media(f"{chat_id}/{msg_id}")
+                  
+                  # Gửi sang nhóm đích
+                  await app.send_video(dest_chat, path, caption="Tải thành công bởi Userbot")
+                  os.remove(path)
+
+          asyncio.run(main())
+          EOF
+          
