@@ -1,0 +1,70 @@
+name: Telegram Internal Video Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      message_text:
+        description: 'Tin nhắn chứa link hoặc ID file'
+        required: true
+
+jobs:
+  process_video:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install telethon requests
+
+      - name: Run Downloader Script
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          DEST_CHAT: ${{ secrets.CHAT_ID }}
+          MSG_INPUT: ${{ github.event.inputs.message_text }}
+        run: |
+          python - <<EOF
+          import os
+          import asyncio
+          from telethon import TelegramClient
+
+          async def main():
+              api_id = os.getenv('API_ID')
+              api_hash = os.getenv('API_HASH')
+              bot_token = os.getenv('BOT_TOKEN')
+              dest_chat = int(os.getenv('DEST_CHAT'))
+              msg_input = os.getenv('MSG_INPUT')
+
+              client = await TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
+              
+              # Nếu input là link nội bộ (t.me/c/chat_id/message_id)
+              if "t.me/" in msg_input:
+                  try:
+                      parts = msg_input.split('/')
+                      msg_id = int(parts[-1])
+                      chat_peer = parts[-2]
+                      # Chuyển đổi ID chat nếu là group kín
+                      if chat_peer.isdigit():
+                          chat_peer = int(f"-100{chat_peer}")
+                      
+                      message = await client.get_messages(chat_peer, ids=msg_id)
+                      if message.video:
+                          print("Đang tải video nội bộ...")
+                          path = await message.download_media()
+                          await client.send_file(dest_chat, path, caption="Video tải từ link nội bộ")
+                          os.remove(path)
+                  except Exception as e:
+                      print(f"Lỗi: {e}")
+              
+              await client.disconnect()
+
+          asyncio.run(main())
+          EOF
+          
