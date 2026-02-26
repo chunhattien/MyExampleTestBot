@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       video_link:
-        description: 'Dán link video nội bộ (t.me/c/...) hoặc link ngoài'
+        description: 'Dán link video nội bộ (t.me/c/...) hoặc link nhóm công khai'
         required: true
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Pyrogram
+      - name: Install Dependencies
         run: pip install pyrogram tgcrypto
 
       - name: Process Video
@@ -33,6 +33,7 @@ jobs:
           python - <<EOF
           import os
           import asyncio
+          import re
           from pyrogram import Client
 
           async def main():
@@ -43,18 +44,45 @@ jobs:
               video_link = os.getenv("VIDEO_LINK")
 
               async with Client("my_account", api_id, api_hash, session_string=session) as app:
-                  # Phân tích link t.me/c/12345678/999
-                  parts = video_link.split('/')
-                  chat_id = int("-100" + parts[-2])
-                  msg_id = int(parts[-1])
+                  # Phân tích link để lấy ID
+                  # Ví dụ link: https://t.me/c/2418576402/285
+                  pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
+                  match = re.search(pattern, video_link)
                   
-                  # Tải video từ nhóm kín (vì tài khoản của bạn đã ở trong nhóm đó)
-                  print("Đang tải video...")
-                  path = await app.download_media(f"{chat_id}/{msg_id}")
+                  if not match:
+                      print("❌ Link không đúng định dạng Telegram!")
+                      return
+
+                  chat_val = match.group(1)
+                  msg_id = int(match.group(2))
                   
-                  # Gửi sang nhóm đích
-                  await app.send_video(dest_chat, path, caption="Tải thành công bởi Userbot")
-                  os.remove(path)
+                  # Xử lý ID chat cho nhóm kín (cần thêm -100)
+                  if chat_val.isdigit():
+                      target_chat = int("-100" + chat_val)
+                  else:
+                      target_chat = chat_val # Nhóm công khai dùng username
+
+                  print(f"🔄 Đang kết nối tới chat: {target_chat}, tin nhắn: {msg_id}")
+
+                  try:
+                      # BƯỚC QUAN TRỌNG: Lấy đối tượng tin nhắn trước
+                      msg = await app.get_messages(target_chat, msg_id)
+                      
+                      if msg.video or msg.document or msg.animation:
+                          print("📥 Đang tải media về máy ảo GitHub...")
+                          # Tải trực tiếp từ đối tượng tin nhắn
+                          file_path = await app.download_media(msg)
+                          
+                          print(f"📤 Đang upload lên nhóm đích ({dest_chat})...")
+                          await app.send_video(dest_chat, file_path, caption=f"✅ Tải từ: {video_link}")
+                          
+                          # Xóa file sau khi gửi để dọn dẹp bộ nhớ
+                          os.remove(file_path)
+                          print("✨ Hoàn thành!")
+                      else:
+                          print("⚠️ Tin nhắn này không chứa video hoặc file!")
+                  except Exception as e:
+                      print(f"❌ Có lỗi xảy ra: {str(e)}")
 
           asyncio.run(main())
           EOF
