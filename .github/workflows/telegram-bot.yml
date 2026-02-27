@@ -34,71 +34,77 @@ jobs:
           from telegram import Update
           from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-          BOT_TOKEN=os.environ["BOT_TOKEN"]
-          GH_TOKEN=os.environ["GH_TOKEN"]
-          REPO=os.environ["REPO"]
-          WORKFLOW_ID=os.environ["WORKFLOW_ID"]
-          ALLOWED=os.environ.get("ALLOWED_USER")
+          BOT_TOKEN = os.environ["BOT_TOKEN"]
+          GH_TOKEN = os.environ["GH_TOKEN"]
+          REPO = os.environ["REPO"]
+          WORKFLOW_ID = os.environ["WORKFLOW_ID"]
+          ALLOWED = os.environ.get("ALLOWED_USER")
 
-          headers={
-              "Authorization":f"Bearer {GH_TOKEN}",
-              "Accept":"application/vnd.github+json"
+          headers = {
+              "Authorization": f"Bearer {GH_TOKEN}",
+              "Accept": "application/vnd.github+json"
           }
 
           async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-              msg=update.message
-
-              if ALLOWED and str(msg.from_user.id)!=ALLOWED:
+              msg = update.message
+              if ALLOWED and str(msg.from_user.id) != ALLOWED:
                   return
 
-              payload=None
+              payload = None
 
               # ===== LINK =====
               if msg.text:
-                  payload={
-                      "chat_id":msg.text,
-                      "message_id":"0",
-                      "source_type":"link"
+                  payload = {
+                      "chat_id": msg.text,
+                      "message_id": "0",
+                      "source_type": "link"
                   }
 
-              # ===== DIRECT VIDEO =====
-              elif msg.video or msg.document or msg.animation:
-                  payload={
-                      "chat_id":str(msg.chat.id),
-                      "message_id":str(msg.message_id),
-                      "source_type":"direct"
+              # ===== DIRECT VIDEO/PHOTO =====
+              elif msg.video or msg.document or msg.animation or msg.photo:
+                  payload = {
+                      "chat_id": str(msg.chat.id),
+                      "message_id": str(msg.message_id),
+                      "source_type": "direct"
                   }
 
-              # ===== FORWARDED =====
+              # ===== FORWARDED FROM CHANNEL/GROUP =====
               elif msg.forward_from_chat:
-                  payload={
-                      "chat_id":str(msg.forward_from_chat.id),
-                      "message_id":str(msg.forward_from_message_id),
-                      "source_type":"forward"
+                  payload = {
+                      "chat_id": str(msg.forward_from_chat.id),
+                      "message_id": str(msg.forward_from_message_id),
+                      "source_type": "forward"
+                  }
+
+              # ===== FORWARDED FROM USER =====
+              elif msg.forward_from:
+                  payload = {
+                      "chat_id": str(msg.forward_from.id),
+                      "message_id": str(msg.forward_from_message_id),
+                      "source_type": "forward"
                   }
 
               else:
                   await msg.reply_text("❌ Unsupported message")
                   return
 
-              r=requests.post(
+              # Gửi workflow_dispatch
+              r = requests.post(
                   f"https://api.github.com/repos/{REPO}/actions/workflows/{WORKFLOW_ID}/dispatches",
                   headers=headers,
                   json={
-                      "ref":"main",
-                      "inputs":payload
+                      "ref": "main",
+                      "inputs": payload
                   }
               )
 
-              if r.status_code==204:
+              if r.status_code == 204:
                   await msg.reply_text("🚀 Job started!")
               else:
-                  await msg.reply_text(f"❌ Error {r.status_code}\\n{r.text}")
+                  await msg.reply_text(f"❌ Error {r.status_code}\n{r.text}")
 
-          app=ApplicationBuilder().token(BOT_TOKEN).build()
+          app = ApplicationBuilder().token(BOT_TOKEN).build()
           app.add_handler(MessageHandler(filters.ALL, handle))
-
           print("Bot running...")
           app.run_polling()
           EOF
