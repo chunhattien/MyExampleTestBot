@@ -36,7 +36,7 @@ jobs:
         run: |
           python - <<EOF
           import os, asyncio, sys, re
-          from pyrogram import Client
+          from pyrogram import Client, errors
 
           async def progress(current, total):
               p = current * 100 / total
@@ -53,7 +53,7 @@ jobs:
               message_id = int(os.getenv("MESSAGE_ID"))
               source_type = os.getenv("SOURCE_TYPE")
 
-              # Xác định chat đích
+              # Parse destination chat
               try:
                   dest_chat = int(dest_chat_raw)
               except:
@@ -70,7 +70,7 @@ jobs:
                   async for _ in app.get_dialogs(limit=100):
                       pass
 
-                  # Xử lý link dạng t.me/...
+                  # Xác định target_chat dựa trên source_type
                   if source_type == "link":
                       pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
                       m = re.search(pattern, chat_input)
@@ -84,12 +84,33 @@ jobs:
                       else:
                           target_chat = chat_val
                   else:
-                      target_chat = int(chat_input)
+                      # "direct" hoặc "forward" – chat_input là số ID
+                      try:
+                          target_chat = int(chat_input)
+                      except:
+                          print(f"❌ Chat ID must be integer, got: {chat_input}")
+                          return
 
                   print(f"📥 Fetching message {message_id} from chat {target_chat}...")
-                  msg = await app.get_messages(target_chat, message_id)
+                  try:
+                      msg = await app.get_messages(target_chat, message_id)
+                  except errors.RPCError as e:
+                      print(f"❌ Telegram error: {e}")
+                      return
 
-                  # Kiểm tra các loại media
+                  if not msg:
+                      print("❌ Message not found (empty response).")
+                      return
+
+                  # Debug: in các thuộcính cơ bản
+                  print(f"Message ID: {msg.id}")
+                  print(f"Chat ID: {msg.chat.id}")
+                  print(f"Has video: {bool(msg.video)}")
+                  print(f"Has document: {bool(msg.document)}")
+                  print(f"Has animation: {bool(msg.animation)}")
+                  print(f"Has photo: {bool(msg.photo)}")
+                  print(f"Caption: {msg.caption}")
+
                   media = None
                   media_type = None
                   if msg.video:
@@ -107,12 +128,11 @@ jobs:
 
                   if not media:
                       print("❌ No supported media found (only video/document/animation/photo).")
-                      print("🔍 Message attributes:", dir(msg))
                       return
 
                   print(f"✅ Found media type: {media_type}")
 
-                  # Giữ caption gốc
+                  # Giữ caption gốc và thêm dòng xử lý
                   original_caption = msg.caption or ""
                   if original_caption:
                       caption = original_caption + "\n\n✅ Processed by GitHub Action"
