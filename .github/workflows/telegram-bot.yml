@@ -49,11 +49,9 @@ jobs:
               "Accept": "application/vnd.github+json"
           }
 
-          # Bộ nhớ tạm để gom album: key = (chat_id, media_group_id), value = [message_ids, timer_task]
           pending_albums = {}
 
           async def trigger_workflow(chat_id, message_ids, source_type):
-              """Kích hoạt workflow với danh sách message_id (phân cách bằng dấu phẩy)"""
               payload = {
                   "chat_id": chat_id,
                   "message_id": ",".join(str(mid) for mid in message_ids),
@@ -67,43 +65,38 @@ jobs:
               return r.status_code == 204
 
           async def process_album(chat_id, media_group_id, first_msg):
-              """Đợi 2 giây để gom các tin nhắn khác trong album, rồi gửi workflow"""
               await asyncio.sleep(2)
               key = (chat_id, media_group_id)
               if key in pending_albums:
                   msg_ids = pending_albums[key][0]
                   del pending_albums[key]
-                  # Kích hoạt workflow cho toàn bộ album
                   success = await trigger_workflow(str(chat_id), msg_ids, "album")
                   if success:
                       await first_msg.reply_text(f"🚀 Album job started with {len(msg_ids)} items!")
                   else:
                       await first_msg.reply_text("❌ Failed to start album job")
-              # Nếu key không còn, tức là đã xử lý rồi
 
           async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
               msg = update.message
               if ALLOWED and str(msg.from_user.id) != ALLOWED:
                   return
 
-              chat_id = msg.chat.id
-              source_type = None
-              message_ids = []
-
-              # Xác định loại nguồn (forward hay direct) và chat_id thật
+              # Xác định real_chat_id và real_message_id dựa trên forward hay direct
               if msg.forward_from_chat:
                   real_chat_id = msg.forward_from_chat.id
+                  real_message_id = msg.forward_from_message_id
                   source_type = "forward"
               elif msg.forward_from:
                   real_chat_id = msg.forward_from.id
+                  real_message_id = msg.forward_from_message_id
                   source_type = "forward"
               else:
-                  real_chat_id = chat_id
+                  real_chat_id = msg.chat.id
+                  real_message_id = msg.message_id
                   source_type = "direct"
 
-              # Nếu là link text thì xử lý riêng
+              # Xử lý link (text, không media)
               if msg.text and not msg.media_group_id:
-                  # Link
                   payload = {
                       "chat_id": msg.text,
                       "message_id": "0",
@@ -120,32 +113,28 @@ jobs:
                       await msg.reply_text(f"❌ Error {r.status_code}\n{r.text}")
                   return
 
-              # Nếu tin nhắn có media và có media_group_id -> thuộc album
+              # Xử lý album (media group)
               if msg.media_group_id and (msg.video or msg.document or msg.animation or msg.photo):
                   key = (real_chat_id, msg.media_group_id)
                   if key not in pending_albums:
-                      # Tạo mới album với timer
-                      pending_albums[key] = ([msg.message_id], None)
+                      pending_albums[key] = ([real_message_id], None)
                       task = asyncio.create_task(process_album(real_chat_id, msg.media_group_id, msg))
-                      pending_albums[key] = ([msg.message_id], task)
+                      pending_albums[key] = ([real_message_id], task)
                   else:
-                      # Thêm message_id vào album hiện có
                       msg_list, task = pending_albums[key]
-                      msg_list.append(msg.message_id)
+                      msg_list.append(real_message_id)
                       pending_albums[key] = (msg_list, task)
-                  # Không reply ngay, đợi xử lý album
                   return
 
-              # Tin nhắn media đơn lẻ
+              # Xử lý media đơn lẻ
               if msg.video or msg.document or msg.animation or msg.photo:
-                  success = await trigger_workflow(str(real_chat_id), [msg.message_id], source_type)
+                  success = await trigger_workflow(str(real_chat_id), [real_message_id], source_type)
                   if success:
                       await msg.reply_text("🚀 Job started!")
                   else:
                       await msg.reply_text("❌ Failed to start job")
                   return
 
-              # Các loại khác không hỗ trợ
               await msg.reply_text("❌ Unsupported message")
 
           app = ApplicationBuilder().token(BOT_TOKEN).build()
