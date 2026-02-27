@@ -9,18 +9,16 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - name: Install deps
+      - name: Install dependencies
         run: pip install pyrogram tgcrypto requests
 
-      - name: Run Listener
+      - name: Start Telegram Listener
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -40,7 +38,7 @@ jobs:
           token = os.getenv("GH_TOKEN")
           repo = os.getenv("REPO")
 
-          print("✅ Starting Telegram listener...", flush=True)
+          print("✅ Listener starting...", flush=True)
 
           app = Client(
               "listener",
@@ -60,18 +58,15 @@ jobs:
                   },
                   json={
                       "event_type": "telegram_video",
-                      "client_payload": {
-                          "link": link
-                      }
+                      "client_payload": {"link": link}
                   }
               )
 
-              print("Dispatch status:", r.status_code, flush=True)
+              print("Dispatch:", r.status_code, flush=True)
 
           @app.on_message(filters.all)
           async def handler(client, message):
 
-              # chỉ xử lý khi có media
               if not (
                   message.video
                   or message.document
@@ -81,7 +76,7 @@ jobs:
                   return
 
               if not message.link:
-                  print("⚠️ Message has no public link", flush=True)
+                  print("⚠️ No public link", flush=True)
                   return
 
               print("🚀 Trigger:", message.link, flush=True)
