@@ -1,0 +1,70 @@
+name: Telegram Bot Listener
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"   # đảm bảo luôn có bot
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: pip install requests python-telegram-bot==20.7
+
+      - name: Run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<EOF
+          import os, requests, time
+          from telegram import Update
+          from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+
+          BOT_TOKEN=os.environ["BOT_TOKEN"]
+          GH_TOKEN=os.environ["GH_TOKEN"]
+          REPO=os.environ["REPO"]
+
+          async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+              text = update.message.text
+
+              url=f"https://api.github.com/repos/{REPO}/actions/workflows/Telegram Userbot Downloader.yml/dispatches"
+
+              headers={
+                  "Authorization":f"Bearer {GH_TOKEN}",
+                  "Accept":"application/vnd.github+json"
+              }
+
+              data={
+                  "ref":"main",
+                  "inputs":{
+                      "video_link":text
+                  }
+              }
+
+              r=requests.post(url,json=data,headers=headers)
+
+              if r.status_code==204:
+                  msg="🚀 Job started!"
+              else:
+                  msg=f"❌ Error {r.status_code}: {r.text}"
+
+              await update.message.reply_text(msg)
+
+          app=ApplicationBuilder().token(BOT_TOKEN).build()
+          app.add_handler(MessageHandler(filters.TEXT, handle))
+
+          print("Bot running...")
+          app.run_polling()
+          EOF
