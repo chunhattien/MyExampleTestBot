@@ -24,7 +24,7 @@ jobs:
       - name: Install Dependencies
         run: pip install pyrogram tgcrypto
 
-      - name: Process Video
+      - name: Process Media
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -53,6 +53,7 @@ jobs:
               message_id = int(os.getenv("MESSAGE_ID"))
               source_type = os.getenv("SOURCE_TYPE")
 
+              # Xác định chat đích
               try:
                   dest_chat = int(dest_chat_raw)
               except:
@@ -65,10 +66,11 @@ jobs:
                   session_string=session
               ) as app:
 
-                  print("Syncing dialogs...")
+                  print("🔄 Syncing dialogs...")
                   async for _ in app.get_dialogs(limit=100):
                       pass
 
+                  # Xử lý link dạng t.me/...
                   if source_type == "link":
                       pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
                       m = re.search(pattern, chat_input)
@@ -84,9 +86,10 @@ jobs:
                   else:
                       target_chat = int(chat_input)
 
-                  print("Fetching message...")
+                  print(f"📥 Fetching message {message_id} from chat {target_chat}...")
                   msg = await app.get_messages(target_chat, message_id)
 
+                  # Kiểm tra các loại media
                   media = None
                   media_type = None
                   if msg.video:
@@ -98,22 +101,28 @@ jobs:
                   elif msg.animation:
                       media = msg.animation
                       media_type = "animation"
+                  elif msg.photo:
+                      media = msg.photo
+                      media_type = "photo"
 
                   if not media:
-                      print("❌ No media found")
+                      print("❌ No supported media found (only video/document/animation/photo).")
+                      print("🔍 Message attributes:", dir(msg))
                       return
 
+                  print(f"✅ Found media type: {media_type}")
+
+                  # Giữ caption gốc
                   original_caption = msg.caption or ""
-                  caption = original_caption
                   if original_caption:
-                      caption += "\n\n✅ Processed by GitHub Action"
+                      caption = original_caption + "\n\n✅ Processed by GitHub Action"
                   else:
                       caption = "✅ Processed by GitHub Action"
 
-                  print("Downloading...")
+                  print("⬇️ Downloading...")
                   file_path = await app.download_media(msg, progress=progress)
 
-                  print("\nUploading...")
+                  print("\n⬆️ Uploading...")
                   if media_type == "video":
                       await app.send_video(
                           dest_chat,
@@ -130,6 +139,13 @@ jobs:
                       )
                   elif media_type == "animation":
                       await app.send_animation(
+                          dest_chat,
+                          file_path,
+                          caption=caption,
+                          progress=progress
+                      )
+                  elif media_type == "photo":
+                      await app.send_photo(
                           dest_chat,
                           file_path,
                           caption=caption,
