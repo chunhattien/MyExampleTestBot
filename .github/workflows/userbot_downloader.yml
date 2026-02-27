@@ -37,6 +37,7 @@ jobs:
           python - <<EOF
           import os, asyncio, sys, re
           from pyrogram import Client, errors
+          from pyrogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
 
           async def progress(current, total):
               p = current * 100 / total
@@ -64,6 +65,12 @@ jobs:
               except:
                   dest_chat = dest_chat_raw
 
+              # Parse message IDs (có thể là danh sách phân cách bằng dấu phẩy)
+              if "," in message_id_input:
+                  message_ids = [int(mid.strip()) for mid in message_id_input.split(",")]
+              else:
+                  message_ids = [int(message_id_input)]
+
               async with Client(
                   "userbot",
                   api_id,
@@ -72,10 +79,8 @@ jobs:
               ) as app:
 
                   print("🔄 Syncing dialogs...")
-                  dialogs_list = []
-                  async for dialog in app.get_dialogs(limit=100):
-                      dialogs_list.append((dialog.chat.id, dialog.chat.title or "Private"))
-                  print(f"📋 Available dialogs (first 10): {dialogs_list[:10]}")
+                  async for _ in app.get_dialogs(limit=100):
+                      pass
 
                   # Xác định target_chat dựa trên source_type
                   if source_type == "link":
@@ -85,110 +90,111 @@ jobs:
                           print("❌ Invalid link")
                           return
                       chat_val = m.group(1)
+                      # Link chỉ có một message_id duy nhất
                       message_id = int(m.group(2))
                       if chat_val.isdigit():
                           target_chat = int("-100" + chat_val)
                       else:
                           target_chat = chat_val
+                      # Ghi đè message_ids
+                      message_ids = [message_id]
                   else:
-                      # "direct" hoặc "forward" – chat_input là số ID
+                      # direct/forward/album – chat_input là số ID
                       try:
                           target_chat = int(chat_input)
-                          message_id = int(message_id_input)
                       except:
-                          print(f"❌ Chat ID / Message ID must be integers, got: {chat_input} / {message_id_input}")
+                          print(f"❌ Chat ID must be integer, got: {chat_input}")
                           return
 
-                  print(f"🎯 Target chat: {target_chat} (type: {type(target_chat)})")
-                  print(f"🎯 Target message ID: {message_id}")
+                  print(f"🎯 Target chat: {target_chat}")
+                  print(f"🎯 Message IDs: {message_ids}")
 
-                  # Kiểm tra xem target_chat có trong dialogs không
-                  if target_chat not in [c[0] for c in dialogs_list]:
-                      print("⚠️ Warning: Target chat not found in dialogs! Userbot might not have access.")
+                  # Lấy tất cả các tin nhắn
+                  messages = []
+                  for mid in message_ids:
+                      try:
+                          msg = await app.get_messages(target_chat, mid)
+                          if msg:
+                              messages.append(msg)
+                          else:
+                              print(f"⚠️ Message {mid} not found, skipping")
+                      except errors.RPCError as e:
+                          print(f"⚠️ Error fetching message {mid}: {e}")
 
-                  print(f"📥 Fetching message {message_id} from chat {target_chat}...")
-                  try:
-                      msg = await app.get_messages(target_chat, message_id)
-                  except errors.RPCError as e:
-                      print(f"❌ Telegram error: {e}")
+                  if not messages:
+                      print("❌ No messages could be fetched.")
                       return
 
-                  if not msg:
-                      print("❌ Message not found (empty response).")
+                  print(f"✅ Fetched {len(messages)} messages.")
+
+                  # Xác định loại media và tải về
+                  downloaded_files = []
+                  media_list = []  # Cho album
+
+                  for msg in messages:
+                      media = None
+                      media_type = None
+                      if msg.video:
+                          media = msg.video
+                          media_type = "video"
+                      elif msg.document:
+                          media = msg.document
+                          media_type = "document"
+                      elif msg.animation:
+                          media = msg.animation
+                          media_type = "animation"
+                      elif msg.photo:
+                          media = msg.photo
+                          media_type = "photo"
+
+                      if not media:
+                          print(f"⚠️ Message {msg.id} has no supported media, skipping")
+                          continue
+
+                      print(f"⬇️ Downloading message {msg.id} ({media_type})...")
+                      file_path = await app.download_media(msg, progress=progress)
+                      downloaded_files.append((file_path, media_type, msg.caption or ""))
+
+                  if not downloaded_files:
+                      print("❌ No media downloaded.")
                       return
-
-                  # Debug chi tiết
-                  print(f"✅ Message fetched successfully!")
-                  print(f"   Message ID: {msg.id}")
-                  print(f"   Chat ID: {msg.chat.id}")
-                  print(f"   Has video: {bool(msg.video)}")
-                  print(f"   Has document: {bool(msg.document)}")
-                  print(f"   Has animation: {bool(msg.animation)}")
-                  print(f"   Has photo: {bool(msg.photo)}")
-                  print(f"   Caption: {msg.caption}")
-
-                  media = None
-                  media_type = None
-                  if msg.video:
-                      media = msg.video
-                      media_type = "video"
-                  elif msg.document:
-                      media = msg.document
-                      media_type = "document"
-                  elif msg.animation:
-                      media = msg.animation
-                      media_type = "animation"
-                  elif msg.photo:
-                      media = msg.photo
-                      media_type = "photo"
-
-                  if not media:
-                      print("❌ No supported media found (only video/document/animation/photo).")
-                      return
-
-                  print(f"✅ Found media type: {media_type}")
-
-                  # Giữ caption gốc và thêm dòng xử lý
-                  original_caption = msg.caption or ""
-                  if original_caption:
-                      caption = original_caption + "\n\n✅ Processed by GitHub Action"
-                  else:
-                      caption = "✅ Processed by GitHub Action"
-
-                  print("⬇️ Downloading...")
-                  file_path = await app.download_media(msg, progress=progress)
 
                   print("\n⬆️ Uploading...")
-                  if media_type == "video":
-                      await app.send_video(
-                          dest_chat,
-                          file_path,
-                          caption=caption,
-                          progress=progress
-                      )
-                  elif media_type == "document":
-                      await app.send_document(
-                          dest_chat,
-                          file_path,
-                          caption=caption,
-                          progress=progress
-                      )
-                  elif media_type == "animation":
-                      await app.send_animation(
-                          dest_chat,
-                          file_path,
-                          caption=caption,
-                          progress=progress
-                      )
-                  elif media_type == "photo":
-                      await app.send_photo(
-                          dest_chat,
-                          file_path,
-                          caption=caption,
-                          progress=progress
-                      )
+                  if len(downloaded_files) == 1:
+                      # Gửi đơn lẻ
+                      file_path, media_type, caption = downloaded_files[0]
+                      caption_full = caption + "\n\n✅ Processed by GitHub Action" if caption else "✅ Processed by GitHub Action"
+                      if media_type == "video":
+                          await app.send_video(dest_chat, file_path, caption=caption_full, progress=progress)
+                      elif media_type == "document":
+                          await app.send_document(dest_chat, file_path, caption=caption_full, progress=progress)
+                      elif media_type == "animation":
+                          await app.send_animation(dest_chat, file_path, caption=caption_full, progress=progress)
+                      elif media_type == "photo":
+                          await app.send_photo(dest_chat, file_path, caption=caption_full, progress=progress)
+                  else:
+                      # Gửi dạng album (media group)
+                      for file_path, media_type, caption in downloaded_files:
+                          caption_full = caption + "\n\n✅ Processed by GitHub Action" if caption else "✅ Processed by GitHub Action"
+                          if media_type == "video":
+                              media_list.append(InputMediaVideo(media=file_path, caption=caption_full))
+                          elif media_type == "photo":
+                              media_list.append(InputMediaPhoto(media=file_path, caption=caption_full))
+                          # Document và animation không hỗ trợ trong media group? Thực tế chỉ photo/video mới tạo album được.
+                          # Nếu gặp document/animation, ta gửi riêng? Hoặc bỏ qua? Ở đây tạm bỏ qua để tránh lỗi.
+                          else:
+                              print(f"⚠️ {media_type} cannot be in album, sending separately...")
+                              if media_type == "document":
+                                  await app.send_document(dest_chat, file_path, caption=caption_full)
+                              elif media_type == "animation":
+                                  await app.send_animation(dest_chat, file_path, caption=caption_full)
+                      if media_list:
+                          await app.send_media_group(dest_chat, media_list)
 
-                  os.remove(file_path)
+                  # Dọn dẹp file
+                  for file_path, _, _ in downloaded_files:
+                      os.remove(file_path)
+
                   print("\n✅ DONE")
 
           asyncio.run(main())
