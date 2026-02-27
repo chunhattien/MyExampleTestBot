@@ -11,15 +11,18 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - run: pip install pyrogram tgcrypto
+      - name: Install deps
+        run: pip install pyrogram tgcrypto
 
-      - name: Stream relay
+      - name: Stream Relay
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -28,14 +31,19 @@ jobs:
           VIDEO_LINK: ${{ github.event.client_payload.link }}
         run: |
           python - <<'EOF'
-          import os, re, asyncio
+          import os
+          import re
+          import asyncio
           from pyrogram import Client
 
-          api_id=int(os.getenv("API_ID"))
-          api_hash=os.getenv("API_HASH")
-          session=os.getenv("SESSION_STRING")
-          dest_chat=os.getenv("DEST_CHAT")
-          link=os.getenv("VIDEO_LINK")
+          api_id = int(os.getenv("API_ID"))
+          api_hash = os.getenv("API_HASH")
+          session = os.getenv("SESSION_STRING")
+          dest_chat = os.getenv("DEST_CHAT")
+          link = os.getenv("VIDEO_LINK")
+
+          print("🎬 Worker started")
+          print("Link:", link)
 
           async def main():
               async with Client(
@@ -45,28 +53,50 @@ jobs:
                   session_string=session
               ) as app:
 
-                  m=re.search(r"t\.me/(?:c/)?([^/]+)/(\d+)",link)
-                  chat=m.group(1)
-                  msg_id=int(m.group(2))
+                  print("🔄 Sync dialogs...")
+                  async for _ in app.get_dialogs(limit=100):
+                      pass
 
-                  if chat.isdigit():
-                      chat=int("-100"+chat)
+                  pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
+                  m = re.search(pattern, link)
 
-                  msg=await app.get_messages(chat,msg_id)
+                  if not m:
+                      print("❌ Invalid link")
+                      return
 
-                  media = msg.video or msg.document
+                  chat_val = m.group(1)
+                  msg_id = int(m.group(2))
 
-                  print("🎬 Streaming relay...")
+                  if chat_val.isdigit():
+                      target_chat = int("-100" + chat_val)
+                  else:
+                      target_chat = chat_val
+
+                  print("📡 Fetch message:", target_chat, msg_id)
+
+                  msg = await app.get_messages(target_chat, msg_id)
+
+                  if not msg:
+                      print("❌ Message not found")
+                      return
+
+                  media = msg.video or msg.document or msg.animation
+
+                  if not media:
+                      print("⚠️ No media in message")
+                      return
+
+                  print("🚀 Streaming relay started")
 
                   stream = await app.stream_media(msg)
 
                   await app.send_video(
                       dest_chat,
                       stream,
-                      caption=msg.caption or ""
+                      caption=msg.caption or "✅ Relayed via GitHub Actions"
                   )
 
-                  print("✅ Done")
+                  print("✅ DONE")
 
           asyncio.run(main())
           EOF
