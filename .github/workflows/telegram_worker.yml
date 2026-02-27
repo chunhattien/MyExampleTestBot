@@ -1,8 +1,8 @@
-name: Telegram Streaming Worker
+name: Telegram Worker (message_id mode)
 
 on:
   repository_dispatch:
-    types: [telegram_video]
+    types: [telegram_media]
 
 concurrency:
   group: telegram-stream
@@ -18,31 +18,35 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install deps
         run: pip install pyrogram tgcrypto
 
-      - name: Stream Relay
+      - name: Process Media
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
           DEST_CHAT: ${{ secrets.DEST_CHAT }}
-          VIDEO_LINK: ${{ github.event.client_payload.link }}
+          CHAT_ID: ${{ github.event.client_payload.chat_id }}
+          MESSAGE_ID: ${{ github.event.client_payload.message_id }}
+          MEDIA_GROUP_ID: ${{ github.event.client_payload.media_group_id }}
         run: |
           python - <<'EOF'
           import os
-          import re
           import asyncio
           from pyrogram import Client
 
           api_id = int(os.getenv("API_ID"))
           api_hash = os.getenv("API_HASH")
           session = os.getenv("SESSION_STRING")
+
           dest_chat = os.getenv("DEST_CHAT")
-          link = os.getenv("VIDEO_LINK")
+          chat_id = int(os.getenv("CHAT_ID"))
+          message_id = int(os.getenv("MESSAGE_ID"))
+          media_group_id = os.getenv("MEDIA_GROUP_ID")
 
           print("🎬 Worker started", flush=True)
-          print("Link:", link, flush=True)
+          print("chat:", chat_id, "msg:", message_id, flush=True)
 
           async def main():
               async with Client(
@@ -52,60 +56,47 @@ jobs:
                   session_string=session
               ) as app:
 
-                  # -------- Parse link ----------
-                  pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
-                  m = re.search(pattern, link)
+                  # ensure peer known
+                  await app.get_chat(chat_id)
 
-                  if not m:
-                      print("❌ Invalid link", flush=True)
+                  # ---------- album ----------
+                  if media_group_id:
+                      print("📦 Media group detected", flush=True)
+
+                      msgs = await app.get_media_group(chat_id, message_id)
+
+                      for m in msgs:
+                          media = m.video or m.document or m.animation
+                          if not media:
+                              continue
+
+                          stream = await app.stream_media(m)
+
+                          await app.send_video(
+                              dest_chat,
+                              stream,
+                              caption=m.caption or "✅ Album relay"
+                          )
+
+                      print("✅ Album done", flush=True)
                       return
 
-                  chat_val = m.group(1)
-                  msg_id = int(m.group(2))
-
-                  if chat_val.startswith("-100"):
-                      target_chat = int(chat_val)
-                  elif chat_val.isdigit():
-                      target_chat = int("-100" + chat_val)
-                  else:
-                      target_chat = chat_val
-
-                  print("📡 Target:", target_chat, msg_id, flush=True)
-
-                  # -------- FIX PEER CACHE ----------
-                  print("🔄 Resolving peer...", flush=True)
-
-                  try:
-                      await app.get_chat(target_chat)
-                  except Exception as e:
-                      print("get_chat:", e, flush=True)
-
-                  async for dialog in app.get_dialogs(limit=500):
-                      if dialog.chat.id == target_chat:
-                          print("✅ Peer cached", flush=True)
-                          break
-
-                  # -------- Fetch message ----------
-                  msg = await app.get_messages(target_chat, msg_id)
-
-                  if not msg:
-                      print("❌ Message not found", flush=True)
-                      return
+                  # ---------- single media ----------
+                  msg = await app.get_messages(chat_id, message_id)
 
                   media = msg.video or msg.document or msg.animation
-
                   if not media:
-                      print("⚠️ No media found", flush=True)
+                      print("⚠️ No media", flush=True)
                       return
 
-                  print("🚀 Streaming relay...", flush=True)
+                  print("🚀 Streaming...", flush=True)
 
                   stream = await app.stream_media(msg)
 
                   await app.send_video(
                       dest_chat,
                       stream,
-                      caption=msg.caption or "✅ Relayed via GitHub Actions"
+                      caption=msg.caption or "✅ Relayed"
                   )
 
                   print("✅ DONE", flush=True)
