@@ -9,15 +9,18 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - run: pip install pyrogram tgcrypto requests
+      - name: Install deps
+        run: pip install pyrogram tgcrypto requests
 
-      - name: Start listener
+      - name: Run Listener
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -26,40 +29,64 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           python - <<'EOF'
-          import os, requests
+          import os
+          import requests
           from pyrogram import Client, filters
 
-          api_id=int(os.getenv("API_ID"))
-          api_hash=os.getenv("API_HASH")
-          session=os.getenv("SESSION_STRING")
+          api_id = int(os.getenv("API_ID"))
+          api_hash = os.getenv("API_HASH")
+          session = os.getenv("SESSION_STRING")
 
-          token=os.getenv("GH_TOKEN")
-          repo=os.getenv("REPO")
+          token = os.getenv("GH_TOKEN")
+          repo = os.getenv("REPO")
 
-          app = Client("listener",
-                       api_id,
-                       api_hash,
-                       session_string=session)
+          print("✅ Starting Telegram listener...", flush=True)
+
+          app = Client(
+              "listener",
+              api_id,
+              api_hash,
+              session_string=session
+          )
 
           def trigger_worker(link):
-              url=f"https://api.github.com/repos/{repo}/dispatches"
-              requests.post(
+              url = f"https://api.github.com/repos/{repo}/dispatches"
+
+              r = requests.post(
                   url,
                   headers={
                       "Authorization": f"token {token}",
-                      "Accept":"application/vnd.github+json"
+                      "Accept": "application/vnd.github+json"
                   },
                   json={
-                      "event_type":"telegram_video",
-                      "client_payload":{"link":link}
+                      "event_type": "telegram_video",
+                      "client_payload": {
+                          "link": link
+                      }
                   }
               )
 
-          @app.on_message(filters.video | filters.document)
-          async def handler(client, message):
-              link = message.link
-              print("🚀 Trigger:", link)
-              trigger_worker(link)
+              print("Dispatch status:", r.status_code, flush=True)
 
+          @app.on_message(filters.all)
+          async def handler(client, message):
+
+              # chỉ xử lý khi có media
+              if not (
+                  message.video
+                  or message.document
+                  or message.animation
+                  or message.media_group_id
+              ):
+                  return
+
+              if not message.link:
+                  print("⚠️ Message has no public link", flush=True)
+                  return
+
+              print("🚀 Trigger:", message.link, flush=True)
+              trigger_worker(message.link)
+
+          print("✅ Listener ready", flush=True)
           app.run()
           EOF
