@@ -1,91 +1,81 @@
-name: Telegram Listener (message_id mode)
+name: telegram_listener
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/1 * * * *"   # chạy mỗi phút
 
 jobs:
   listen:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+      - name: Install Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyrogram tgcrypto requests
 
-      - name: Install deps
-        run: pip install pyrogram tgcrypto requests
-
-      - name: Start Listener
+      - name: Run listener
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          python - <<'EOF'
+          python - << 'EOF'
+          import asyncio
           import os
           import requests
           from pyrogram import Client, filters
 
-          api_id = int(os.getenv("API_ID"))
-          api_hash = os.getenv("API_HASH")
-          session = os.getenv("SESSION_STRING")
+          api_id = int(os.environ["API_ID"])
+          api_hash = os.environ["API_HASH"]
+          session = os.environ["SESSION_STRING"]
+          gh_token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
 
-          token = os.getenv("GH_TOKEN")
-          repo = os.getenv("REPO")
+          WORKFLOW_FILE = "telegram_worker.yml"
 
-          print("✅ Listener starting...", flush=True)
-
-          app = Client(
-              "listener",
-              api_id,
-              api_hash,
-              session_string=session
-          )
-
-          def trigger_worker(chat_id, message_id, media_group_id):
-              url = f"https://api.github.com/repos/{repo}/dispatches"
-
-              payload = {
-                  "event_type": "telegram_media",
-                  "client_payload": {
-                      "chat_id": chat_id,
-                      "message_id": message_id,
-                      "media_group_id": media_group_id
-                  }
-              }
-
-              r = requests.post(
-                  url,
-                  headers={
-                      "Authorization": f"token {token}",
-                      "Accept": "application/vnd.github+json"
-                  },
-                  json=payload
+          async def main():
+              app = Client(
+                  "listener",
+                  api_id=api_id,
+                  api_hash=api_hash,
+                  session_string=session
               )
 
-              print("Dispatch:", r.status_code, payload, flush=True)
+              @app.on_message(filters.private)
+              async def handler(client, message):
+                  chat_id = message.chat.id
+                  message_id = message.id
 
-          @app.on_message(filters.all)
-          async def handler(client, message):
+                  print("📩 received:", chat_id, message_id)
 
-              if not (
-                  message.video
-                  or message.document
-                  or message.animation
-              ):
-                  return
+                  url = f"https://api.github.com/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/dispatches"
 
-              chat_id = message.chat.id
-              message_id = message.id
-              media_group_id = message.media_group_id
+                  payload = {
+                      "ref": "main",
+                      "inputs": {
+                          "chat_id": str(chat_id),
+                          "message_id": str(message_id)
+                      }
+                  }
 
-              print(f"🚀 Media detected chat={chat_id} msg={message_id}", flush=True)
+                  headers = {
+                      "Authorization": f"Bearer {gh_token}",
+                      "Accept": "application/vnd.github+json"
+                  }
 
-              trigger_worker(chat_id, message_id, media_group_id)
+                  r = requests.post(url, json=payload, headers=headers)
+                  print("dispatch status:", r.status_code)
 
-          print("✅ Listener ready", flush=True)
-          app.run()
+              await app.start()
+              print("👂 Listening...")
+
+              await asyncio.sleep(55)
+
+              await app.stop()
+
+          asyncio.run(main())
           EOF
