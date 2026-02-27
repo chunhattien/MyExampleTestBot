@@ -10,9 +10,14 @@ on:
       source_type:
         required: true
 
+concurrency:
+  group: userbot-downloader
+  cancel-in-progress: false   # Không hủy job đang chạy, chỉ xếp hàng job mới
+
 jobs:
   run_userbot:
     runs-on: ubuntu-latest
+    timeout-minutes: 60        # Tăng thời gian cho phép xử lý nhiều file và chờ trong hàng đợi
 
     steps:
       - uses: actions/checkout@v3
