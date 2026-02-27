@@ -1,0 +1,72 @@
+name: Telegram Streaming Worker
+
+on:
+  repository_dispatch:
+    types: [telegram_video]
+
+concurrency:
+  group: telegram-stream
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - run: pip install pyrogram tgcrypto
+
+      - name: Stream relay
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          SESSION_STRING: ${{ secrets.SESSION_STRING }}
+          DEST_CHAT: ${{ secrets.DEST_CHAT }}
+          VIDEO_LINK: ${{ github.event.client_payload.link }}
+        run: |
+          python - <<'EOF'
+          import os, re, asyncio
+          from pyrogram import Client
+
+          api_id=int(os.getenv("API_ID"))
+          api_hash=os.getenv("API_HASH")
+          session=os.getenv("SESSION_STRING")
+          dest_chat=os.getenv("DEST_CHAT")
+          link=os.getenv("VIDEO_LINK")
+
+          async def main():
+              async with Client(
+                  "worker",
+                  api_id,
+                  api_hash,
+                  session_string=session
+              ) as app:
+
+                  m=re.search(r"t\.me/(?:c/)?([^/]+)/(\d+)",link)
+                  chat=m.group(1)
+                  msg_id=int(m.group(2))
+
+                  if chat.isdigit():
+                      chat=int("-100"+chat)
+
+                  msg=await app.get_messages(chat,msg_id)
+
+                  media = msg.video or msg.document
+
+                  print("🎬 Streaming relay...")
+
+                  stream = await app.stream_media(msg)
+
+                  await app.send_video(
+                      dest_chat,
+                      stream,
+                      caption=msg.caption or ""
+                  )
+
+                  print("✅ Done")
+
+          asyncio.run(main())
+          EOF
