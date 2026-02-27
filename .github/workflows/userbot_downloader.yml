@@ -1,3 +1,29 @@
+name: Telegram Userbot Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        required: true
+      message_id:
+        required: true
+      source_type:
+        required: true
+
+jobs:
+  run_userbot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install Dependencies
+        run: pip install pyrogram tgcrypto
+
       - name: Process Video
         env:
           API_ID: ${{ secrets.API_ID }}
@@ -14,7 +40,7 @@
 
           async def progress(current, total):
               p = current * 100 / total
-              sys.stdout.write(f"\\r🚀 {p:.1f}%")
+              sys.stdout.write(f"\r🚀 {p:.1f}%")
               sys.stdout.flush()
 
           async def main():
@@ -43,7 +69,6 @@
                   async for _ in app.get_dialogs(limit=100):
                       pass
 
-                  # ===== XỬ LÝ LINK =====
                   if source_type == "link":
                       pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
                       m = re.search(pattern, chat_input)
@@ -62,7 +87,6 @@
                   print("Fetching message...")
                   msg = await app.get_messages(target_chat, message_id)
 
-                  # Xác định loại media
                   media = None
                   media_type = None
                   if msg.video:
@@ -79,7 +103,6 @@
                       print("❌ No media found")
                       return
 
-                  # Lấy caption gốc (nếu có)
                   original_caption = msg.caption or ""
                   caption = original_caption
                   if original_caption:
