@@ -52,15 +52,21 @@ jobs:
 
               payload = None
 
-              # ===== LINK =====
-              if msg.text:
+              # ===== ƯU TIÊN FORWARD (từ channel/group hoặc user) =====
+              if msg.forward_from_chat:
                   payload = {
-                      "chat_id": msg.text,
-                      "message_id": "0",
-                      "source_type": "link"
+                      "chat_id": str(msg.forward_from_chat.id),
+                      "message_id": str(msg.forward_from_message_id),
+                      "source_type": "forward"
+                  }
+              elif msg.forward_from:
+                  payload = {
+                      "chat_id": str(msg.forward_from.id),
+                      "message_id": str(msg.forward_from_message_id),
+                      "source_type": "forward"
                   }
 
-              # ===== DIRECT VIDEO/PHOTO =====
+              # ===== DIRECT MEDIA (video, ảnh, tài liệu) =====
               elif msg.video or msg.document or msg.animation or msg.photo:
                   payload = {
                       "chat_id": str(msg.chat.id),
@@ -68,20 +74,12 @@ jobs:
                       "source_type": "direct"
                   }
 
-              # ===== FORWARDED FROM CHANNEL/GROUP =====
-              elif msg.forward_from_chat:
+              # ===== LINK (tin nhắn văn bản chứa link) =====
+              elif msg.text:
                   payload = {
-                      "chat_id": str(msg.forward_from_chat.id),
-                      "message_id": str(msg.forward_from_message_id),
-                      "source_type": "forward"
-                  }
-
-              # ===== FORWARDED FROM USER =====
-              elif msg.forward_from:
-                  payload = {
-                      "chat_id": str(msg.forward_from.id),
-                      "message_id": str(msg.forward_from_message_id),
-                      "source_type": "forward"
+                      "chat_id": msg.text,
+                      "message_id": "0",
+                      "source_type": "link"
                   }
 
               else:
