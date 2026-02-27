@@ -3,21 +3,23 @@ name: Telegram Userbot Downloader
 on:
   workflow_dispatch:
     inputs:
-      video_link:
-        description: 'Dán link video nội bộ (t.me/c/...) hoặc link ngoài'
+      chat_id:
+        required: true
+      message_id:
+        required: true
+      source_type:
         required: true
 
 jobs:
   run_userbot:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: "3.9"
 
       - name: Install Dependencies
         run: pip install pyrogram tgcrypto
@@ -28,85 +30,87 @@ jobs:
           API_HASH: ${{ secrets.API_HASH }}
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
           DEST_CHAT: ${{ secrets.DEST_CHAT }}
-          VIDEO_LINK: ${{ github.event.inputs.video_link }}
+          CHAT_ID: ${{ github.event.inputs.chat_id }}
+          MESSAGE_ID: ${{ github.event.inputs.message_id }}
+          SOURCE_TYPE: ${{ github.event.inputs.source_type }}
         run: |
           python - <<EOF
-          import os
-          import asyncio
-          import re
-          import sys
+          import os, asyncio, sys, re
           from pyrogram import Client
 
-          async def progress(current, total):
-              # Hàm hiển thị phần trăm tải/gửi lên console
-              percentage = current * 100 / total
-              sys.stdout.write(f"\r🚀 Tiến độ: {percentage:.1f}%")
+          async def progress(current,total):
+              p=current*100/total
+              sys.stdout.write(f"\\r🚀 {p:.1f}%")
               sys.stdout.flush()
 
           async def main():
-              api_id = int(os.getenv("API_ID"))
-              api_hash = os.getenv("API_HASH")
-              session = os.getenv("SESSION_STRING")
-              dest_chat_raw = os.getenv("DEST_CHAT")
-              video_link = os.getenv("VIDEO_LINK")
 
-              # Chuyển đổi ID chat đích
+              api_id=int(os.getenv("API_ID"))
+              api_hash=os.getenv("API_HASH")
+              session=os.getenv("SESSION_STRING")
+
+              dest_chat_raw=os.getenv("DEST_CHAT")
+              chat_input=os.getenv("CHAT_ID")
+              message_id=int(os.getenv("MESSAGE_ID"))
+              source_type=os.getenv("SOURCE_TYPE")
+
               try:
-                  dest_chat = int(dest_chat_raw)
+                  dest_chat=int(dest_chat_raw)
               except:
-                  dest_chat = dest_chat_raw
+                  dest_chat=dest_chat_raw
 
-              async with Client("my_account", api_id, api_hash, session_string=session) as app:
-                  print("🔄 Đang đồng bộ danh sách nhóm để tránh lỗi Peer ID...")
-                  # Đọc 100 hội thoại gần nhất để cập nhật cache
-                  async for dialog in app.get_dialogs(limit=100):
-                      pass 
+              async with Client(
+                  "userbot",
+                  api_id,
+                  api_hash,
+                  session_string=session
+              ) as app:
 
-                  # Phân tích link Telegram
-                  pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
-                  match = re.search(pattern, video_link)
-                  
-                  if not match:
-                      print("\n❌ Link không đúng định dạng Telegram!")
+                  print("Sync dialogs...")
+                  async for _ in app.get_dialogs(limit=100):
+                      pass
+
+                  # ===== LINK =====
+                  if source_type=="link":
+                      pattern=r"t\.me/(?:c/)?([^/]+)/(\d+)"
+                      m=re.search(pattern,chat_input)
+
+                      if not m:
+                          print("Invalid link")
+                          return
+
+                      chat_val=m.group(1)
+                      message_id=int(m.group(2))
+
+                      if chat_val.isdigit():
+                          target_chat=int("-100"+chat_val)
+                      else:
+                          target_chat=chat_val
+                  else:
+                      target_chat=int(chat_input)
+
+                  print("Fetching message...")
+                  msg=await app.get_messages(target_chat,message_id)
+
+                  media=msg.video or msg.document or msg.animation
+
+                  if not media:
+                      print("No media found")
                       return
 
-                  chat_val = match.group(1)
-                  msg_id = int(match.group(2))
-                  
-                  # Xử lý ID chat nếu là nhóm kín (cần tiền tố -100)
-                  if chat_val.isdigit():
-                      target_chat = int("-100" + chat_val)
-                  else:
-                      target_chat = chat_val
+                  print("Downloading...")
+                  file_path=await app.download_media(msg,progress=progress)
 
-                  print(f"\n📡 Kết nối tới Chat: {target_chat}, Tin nhắn: {msg_id}")
+                  print("\\nUploading...")
+                  await app.send_video(
+                      dest_chat,
+                      file_path,
+                      caption="✅ Processed by GitHub Action",
+                      progress=progress
+                  )
 
-                  try:
-                      # Lấy đối tượng tin nhắn
-                      msg = await app.get_messages(target_chat, msg_id)
-                      
-                      if msg and (msg.video or msg.document or msg.animation):
-                          print("\n📥 Bắt đầu tải video về máy ảo GitHub...")
-                          file_path = await app.download_media(msg, progress=progress)
-                          
-                          print(f"\n📤 Đang gửi video tới nhóm đích: {dest_chat}...")
-                          # Gửi video vào nhóm đích
-                          await app.send_video(
-                              dest_chat, 
-                              file_path, 
-                              caption=f"✅ Tải thành công từ: {video_link}",
-                              progress=progress
-                          )
-                          
-                          # Xóa file tạm trên server GitHub
-                          if os.path.exists(file_path):
-                              os.remove(file_path)
-                          print("\n✨ NHIỆM VỤ HOÀN THÀNH!")
-                      else:
-                          print("\n⚠️ Tin nhắn này không chứa phương tiện (Video/File)!")
-                  except Exception as e:
-                      print(f"\n❌ Lỗi hệ thống: {str(e)}")
+                  os.remove(file_path)
+                  print("\\nDONE")
 
           asyncio.run(main())
           EOF
-          
