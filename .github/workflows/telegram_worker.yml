@@ -14,12 +14,11 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - name: Install deps
+      - name: Install dependencies
         run: pip install pyrogram tgcrypto
 
       - name: Stream Relay
@@ -42,8 +41,8 @@ jobs:
           dest_chat = os.getenv("DEST_CHAT")
           link = os.getenv("VIDEO_LINK")
 
-          print("🎬 Worker started")
-          print("Link:", link)
+          print("🎬 Worker started", flush=True)
+          print("Link:", link, flush=True)
 
           async def main():
               async with Client(
@@ -53,40 +52,53 @@ jobs:
                   session_string=session
               ) as app:
 
-                  print("🔄 Sync dialogs...")
-                  async for _ in app.get_dialogs(limit=100):
-                      pass
-
+                  # -------- Parse link ----------
                   pattern = r"t\.me/(?:c/)?([^/]+)/(\d+)"
                   m = re.search(pattern, link)
 
                   if not m:
-                      print("❌ Invalid link")
+                      print("❌ Invalid link", flush=True)
                       return
 
                   chat_val = m.group(1)
                   msg_id = int(m.group(2))
 
-                  if chat_val.isdigit():
+                  if chat_val.startswith("-100"):
+                      target_chat = int(chat_val)
+                  elif chat_val.isdigit():
                       target_chat = int("-100" + chat_val)
                   else:
                       target_chat = chat_val
 
-                  print("📡 Fetch message:", target_chat, msg_id)
+                  print("📡 Target:", target_chat, msg_id, flush=True)
 
+                  # -------- FIX PEER CACHE ----------
+                  print("🔄 Resolving peer...", flush=True)
+
+                  try:
+                      await app.get_chat(target_chat)
+                  except Exception as e:
+                      print("get_chat:", e, flush=True)
+
+                  async for dialog in app.get_dialogs(limit=500):
+                      if dialog.chat.id == target_chat:
+                          print("✅ Peer cached", flush=True)
+                          break
+
+                  # -------- Fetch message ----------
                   msg = await app.get_messages(target_chat, msg_id)
 
                   if not msg:
-                      print("❌ Message not found")
+                      print("❌ Message not found", flush=True)
                       return
 
                   media = msg.video or msg.document or msg.animation
 
                   if not media:
-                      print("⚠️ No media in message")
+                      print("⚠️ No media found", flush=True)
                       return
 
-                  print("🚀 Streaming relay started")
+                  print("🚀 Streaming relay...", flush=True)
 
                   stream = await app.stream_media(msg)
 
@@ -96,7 +108,7 @@ jobs:
                       caption=msg.caption or "✅ Relayed via GitHub Actions"
                   )
 
-                  print("✅ DONE")
+                  print("✅ DONE", flush=True)
 
           asyncio.run(main())
           EOF
