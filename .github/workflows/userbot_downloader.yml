@@ -50,8 +50,13 @@ jobs:
 
               dest_chat_raw = os.getenv("DEST_CHAT")
               chat_input = os.getenv("CHAT_ID")
-              message_id = int(os.getenv("MESSAGE_ID"))
+              message_id_input = os.getenv("MESSAGE_ID")
               source_type = os.getenv("SOURCE_TYPE")
+
+              print(f"🔍 Received inputs:")
+              print(f"   chat_id: {chat_input}")
+              print(f"   message_id: {message_id_input}")
+              print(f"   source_type: {source_type}")
 
               # Parse destination chat
               try:
@@ -67,8 +72,10 @@ jobs:
               ) as app:
 
                   print("🔄 Syncing dialogs...")
-                  async for _ in app.get_dialogs(limit=100):
-                      pass
+                  dialogs_list = []
+                  async for dialog in app.get_dialogs(limit=100):
+                      dialogs_list.append((dialog.chat.id, dialog.chat.title or "Private"))
+                  print(f"📋 Available dialogs (first 10): {dialogs_list[:10]}")
 
                   # Xác định target_chat dựa trên source_type
                   if source_type == "link":
@@ -87,9 +94,17 @@ jobs:
                       # "direct" hoặc "forward" – chat_input là số ID
                       try:
                           target_chat = int(chat_input)
+                          message_id = int(message_id_input)
                       except:
-                          print(f"❌ Chat ID must be integer, got: {chat_input}")
+                          print(f"❌ Chat ID / Message ID must be integers, got: {chat_input} / {message_id_input}")
                           return
+
+                  print(f"🎯 Target chat: {target_chat} (type: {type(target_chat)})")
+                  print(f"🎯 Target message ID: {message_id}")
+
+                  # Kiểm tra xem target_chat có trong dialogs không
+                  if target_chat not in [c[0] for c in dialogs_list]:
+                      print("⚠️ Warning: Target chat not found in dialogs! Userbot might not have access.")
 
                   print(f"📥 Fetching message {message_id} from chat {target_chat}...")
                   try:
@@ -102,14 +117,15 @@ jobs:
                       print("❌ Message not found (empty response).")
                       return
 
-                  # Debug: in các thuộcính cơ bản
-                  print(f"Message ID: {msg.id}")
-                  print(f"Chat ID: {msg.chat.id}")
-                  print(f"Has video: {bool(msg.video)}")
-                  print(f"Has document: {bool(msg.document)}")
-                  print(f"Has animation: {bool(msg.animation)}")
-                  print(f"Has photo: {bool(msg.photo)}")
-                  print(f"Caption: {msg.caption}")
+                  # Debug chi tiết
+                  print(f"✅ Message fetched successfully!")
+                  print(f"   Message ID: {msg.id}")
+                  print(f"   Chat ID: {msg.chat.id}")
+                  print(f"   Has video: {bool(msg.video)}")
+                  print(f"   Has document: {bool(msg.document)}")
+                  print(f"   Has animation: {bool(msg.animation)}")
+                  print(f"   Has photo: {bool(msg.photo)}")
+                  print(f"   Caption: {msg.caption}")
 
                   media = None
                   media_type = None
