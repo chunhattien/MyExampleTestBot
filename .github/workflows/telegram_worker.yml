@@ -1,105 +1,71 @@
-name: Telegram Worker (message_id mode)
+name: telegram_worker
 
 on:
-  repository_dispatch:
-    types: [telegram_media]
-
-concurrency:
-  group: telegram-stream
-  cancel-in-progress: false
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        required: true
+      message_id:
+        required: true
 
 jobs:
-  run:
+  worker:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Install deps
-        run: pip install pyrogram tgcrypto
-
-      - name: Process Media
-        env:
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          SESSION_STRING: ${{ secrets.SESSION_STRING }}
-          DEST_CHAT: ${{ secrets.DEST_CHAT }}
-          CHAT_ID: ${{ github.event.client_payload.chat_id }}
-          MESSAGE_ID: ${{ github.event.client_payload.message_id }}
-          MEDIA_GROUP_ID: ${{ github.event.client_payload.media_group_id }}
+      - name: Install Python
         run: |
-          python - <<'EOF'
-          import os
+          python -m pip install --upgrade pip
+          pip install pyrogram tgcrypto
+
+      - name: Run worker
+        run: |
+          python - << 'EOF'
           import asyncio
           from pyrogram import Client
 
-          api_id = int(os.getenv("API_ID"))
-          api_hash = os.getenv("API_HASH")
-          session = os.getenv("SESSION_STRING")
+          api_id = int("${{ secrets.API_ID }}")
+          api_hash = "${{ secrets.API_HASH }}"
+          session = "${{ secrets.SESSION_STRING }}"
 
-          dest_chat = os.getenv("DEST_CHAT")
-          chat_id = int(os.getenv("CHAT_ID"))
-          message_id = int(os.getenv("MESSAGE_ID"))
-          media_group_id = os.getenv("MEDIA_GROUP_ID")
-
-          print("🎬 Worker started", flush=True)
-          print("chat:", chat_id, "msg:", message_id, flush=True)
+          chat_id = int("${{ github.event.inputs.chat_id }}")
+          message_id = int("${{ github.event.inputs.message_id }}")
 
           async def main():
-              async with Client(
+              print("🎬 Worker started")
+              print("chat:", chat_id, "msg:", message_id)
+
+              app = Client(
                   "worker",
-                  api_id,
-                  api_hash,
+                  api_id=api_id,
+                  api_hash=api_hash,
                   session_string=session
-              ) as app:
+              )
 
-                  # ensure peer known
-                  await app.get_chat(chat_id)
+              await app.start()
 
-                  # ---------- album ----------
-                  if media_group_id:
-                      print("📦 Media group detected", flush=True)
+              try:
+                  # ⭐ sync peer cache (FIX PEER_ID_INVALID)
+                  async for _ in app.get_dialogs():
+                      pass
 
-                      msgs = await app.get_media_group(chat_id, message_id)
+                  print("✅ dialogs synced")
 
-                      for m in msgs:
-                          media = m.video or m.document or m.animation
-                          if not media:
-                              continue
-
-                          stream = await app.stream_media(m)
-
-                          await app.send_video(
-                              dest_chat,
-                              stream,
-                              caption=m.caption or "✅ Album relay"
-                          )
-
-                      print("✅ Album done", flush=True)
-                      return
-
-                  # ---------- single media ----------
-                  msg = await app.get_messages(chat_id, message_id)
-
-                  media = msg.video or msg.document or msg.animation
-                  if not media:
-                      print("⚠️ No media", flush=True)
-                      return
-
-                  print("🚀 Streaming...", flush=True)
-
-                  stream = await app.stream_media(msg)
-
-                  await app.send_video(
-                      dest_chat,
-                      stream,
-                      caption=msg.caption or "✅ Relayed"
+                  # copy thay vì forward (ổn định hơn)
+                  await app.copy_message(
+                      chat_id="me",
+                      from_chat_id=chat_id,
+                      message_id=message_id
                   )
 
-                  print("✅ DONE", flush=True)
+                  print("✅ message copied")
+
+              except Exception as e:
+                  print("❌ ERROR:", e)
+
+              finally:
+                  await app.stop()
+                  print("🏁 Worker finished")
 
           asyncio.run(main())
           EOF
