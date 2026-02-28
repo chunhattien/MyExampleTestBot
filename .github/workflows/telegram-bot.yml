@@ -3,7 +3,7 @@ name: Telegram Bot Listener
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 * * * *"
 
 concurrency:
   group: telegram-bot-listener
