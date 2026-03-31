@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-@app.get("/")
+# ================= HEALTH CHECK =================
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health():
+    return {"status": "ok"}
+
+# (optional) root endpoint
+@app.api_route("/", methods=["GET", "HEAD"])
 async def home():
     return "OK"
 
@@ -36,9 +42,13 @@ pending_albums = {}
 
 async def download_media(msg):
     if msg.photo:
-        return await msg.download_media(file=tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name)
+        return await msg.download_media(
+            file=tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+        )
     elif msg.video:
-        return await msg.download_media(file=tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name)
+        return await msg.download_media(
+            file=tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+        )
     elif msg.document:
         filename = "file.bin"
         if msg.document.attributes:
@@ -71,6 +81,7 @@ async def process_album(chat_id, grouped_id, dest_entity, client):
     await asyncio.sleep(4)
 
     key = (chat_id, grouped_id)
+
     if key in pending_albums:
         data = pending_albums.pop(key)
         futures = data["msgs"]
@@ -114,7 +125,7 @@ async def run_bot():
                 sender_name = sender.first_name or sender.username or "User"
                 forward_info = f"📨 Từ: {sender_name}"
 
-                # Album
+                # ===== ALBUM =====
                 if msg.grouped_id:
                     key = (msg.chat_id, msg.grouped_id)
 
@@ -135,7 +146,7 @@ async def run_bot():
                         )
                     return
 
-                # Media đơn
+                # ===== MEDIA SINGLE =====
                 if msg.media:
                     path = await download_media(msg)
                     if path:
@@ -143,7 +154,7 @@ async def run_bot():
                         await send_to_dest(client, dest_entity, [path], caption)
                     return
 
-                # Text
+                # ===== TEXT =====
                 if msg.text:
                     await client.send_message(dest_entity, f"{forward_info}\n\n{msg.text}")
 
@@ -156,7 +167,7 @@ async def run_bot():
 # ================= KEEP ALIVE =================
 
 async def self_ping():
-    url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+    url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000/health")
     while True:
         try:
             await httpx.get(url)
