@@ -123,7 +123,7 @@ async def run_bot():
 
                 sender = await msg.get_sender()
                 sender_name = sender.first_name or sender.username or "User"
-                forward_info = f"📨 Từ: {sender_name}"
+                forward_info = f""
 
                 # ===== ALBUM =====
                 if msg.grouped_id:
